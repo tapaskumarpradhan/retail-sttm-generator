@@ -22,25 +22,36 @@ class STTMGenerator:
     All transformations are complex with 2+ nested functions or conditional logic.
     Supports deterministic (seeded) and random generation modes.
     Supports both single-table and multi-table join transformations.
+    Output format matches STTM_Sample.csv.
     """
     
     COLUMNS = [
-        'source_table', 'source_column', 'source_data_type',
-        'target_table', 'target_column', 'transformation_logic',
-        'target_data_type', 'is_nullable', 'description',
-        'is_join', 'join_type', 'join_conditions', 'additional_source_tables'
+        'Source_schema', 'Source_Table', 'Source_Column', 'Source_DataType',
+        'Target_schema', 'Target_Table', 'Target_Column', 'Target_DataType',
+        'Transformation_Logic', 'Primary_key', 'Nullable'
     ]
     
-    def __init__(self, seed: Optional[int] = None, join_probability: float = 0.3):
+    DEFAULT_SOURCE_SCHEMA = 'ecom_demo'
+    DEFAULT_TARGET_SCHEMA = 'ecom_tgt'
+    
+    def __init__(self, seed: Optional[int] = None, join_probability: float = 0.3,
+                 select_probability: float = 0.7, source_schema: str = 'ecom_demo',
+                 target_schema: str = 'ecom_tgt'):
         """
         Initialize generator.
         
         Args:
             seed: Optional random seed for deterministic output
             join_probability: Probability of generating join transformations (0.0-1.0)
+            select_probability: Probability of generating SELECT statements vs simple transforms (0.0-1.0)
+            source_schema: Source schema name
+            target_schema: Target schema name
         """
         self.seed = seed
         self.join_probability = join_probability
+        self.select_probability = select_probability
+        self.source_schema = source_schema
+        self.target_schema = target_schema
         if seed is not None:
             random.seed(seed)
         
@@ -82,15 +93,15 @@ class STTMGenerator:
         
         entity = random.choice(entities)
         
-        is_join = random.random() < self.join_probability
+        use_select = random.random() < self.select_probability
         
-        if is_join:
-            return self._generate_join_record(entity, scenario_name)
+        if use_select:
+            return self._generate_select_record(entity, scenario_name)
         else:
-            return self._generate_single_table_record(entity, scenario_name)
+            return self._generate_simple_transform_record(entity, scenario_name)
     
-    def _generate_single_table_record(self, entity: str, scenario_name: str) -> Dict:
-        """Generate a single-table transformation record"""
+    def _generate_simple_transform_record(self, entity: str, scenario_name: str) -> Dict:
+        """Generate a simple (non-SELECT) transformation record"""
         source_table = NamingGenerator.generate_table_name(entity, layer='raw')
         target_table = NamingGenerator.generate_table_name(entity, layer='target')
         
@@ -112,7 +123,7 @@ class STTMGenerator:
         primary_source_type = source_types[0]
         target_type = DataTypeMapper.map_to_target_type(primary_source_type)
         
-        transform_sql, description, _ = self.transformation_generator.generate_for_columns(
+        transform_sql, description = self.transformation_generator.generate_simple_transformation(
             source_columns, source_types, target_column, target_type, scenario_name
         )
         
@@ -123,27 +134,35 @@ class STTMGenerator:
             source_column = ', '.join(source_columns)
             source_data_type = ', '.join(source_types)
         
-        is_nullable = self._determine_nullable(target_column, transform_sql)
+        is_primary_key = self._is_primary_key_column(target_column)
+        nullable = 'No' if is_primary_key else random.choice(['Yes', 'No'])
         
         return {
-            'source_table': source_table,
-            'source_column': source_column,
-            'source_data_type': source_data_type,
-            'target_table': target_table,
-            'target_column': target_column,
-            'transformation_logic': transform_sql,
-            'target_data_type': target_type,
-            'is_nullable': is_nullable,
-            'description': description,
-            'is_join': False,
-            'join_type': None,
-            'join_conditions': None,
-            'additional_source_tables': None
+            'Source_schema': self.source_schema,
+            'Source_Table': source_table,
+            'Source_Column': source_column,
+            'Source_DataType': source_data_type,
+            'Target_schema': self.target_schema,
+            'Target_Table': target_table,
+            'Target_Column': target_column,
+            'Target_DataType': target_type,
+            'Transformation_Logic': transform_sql,
+            'Primary_key': 'Yes' if is_primary_key else '',
+            'Nullable': nullable
         }
     
-    def _generate_join_record(self, entity: str, scenario_name: str) -> Dict:
-        """Generate a multi-table join transformation record"""
-        num_related = random.randint(1, 2)
+    def _generate_select_record(self, entity: str, scenario_name: str) -> Dict:
+        """Generate a SELECT transformation record with complex joins"""
+        use_join = random.random() < self.join_probability
+        
+        if use_join:
+            return self._generate_complex_join_record(entity, scenario_name)
+        else:
+            return self._generate_simple_select_record(entity, scenario_name)
+    
+    def _generate_simple_select_record(self, entity: str, scenario_name: str) -> Dict:
+        """Generate a simple SELECT transformation (single table or simple join)"""
+        num_related = random.randint(0, 1)
         related_entities = self.transformation_generator.get_related_entities(entity, num_related)
         all_entities = [entity] + related_entities
         
@@ -159,9 +178,9 @@ class STTMGenerator:
         primary_source_type = source_types[0] if source_types else 'VARCHAR'
         target_type = DataTypeMapper.map_to_target_type(primary_source_type)
         
-        transform_sql, description, join_info = self.transformation_generator.generate_for_columns(
+        transform_sql = self.transformation_generator.generate_select_sql(
             source_columns, source_types, target_column, target_type, scenario_name,
-            is_join=True, table_aliases=table_aliases
+            is_join=num_related > 0, table_aliases=table_aliases, primary_table=primary_table
         )
         
         if len(source_columns) == 1:
@@ -176,43 +195,79 @@ class STTMGenerator:
             source_column = ', '.join(qualified_columns[:3])
             source_data_type = ', '.join(source_types[:3])
         
-        is_nullable = self._determine_nullable(target_column, transform_sql)
-        
-        join_type = join_info.get('join_type', 'LEFT') if join_info else 'LEFT'
-        join_conditions = join_info.get('join_conditions', []) if join_info else []
+        is_primary_key = self._is_primary_key_column(target_column)
+        nullable = 'No' if is_primary_key else random.choice(['Yes', 'No'])
         
         return {
-            'source_table': primary_table,
-            'source_column': source_column,
-            'source_data_type': source_data_type,
-            'target_table': target_table,
-            'target_column': target_column,
-            'transformation_logic': transform_sql,
-            'target_data_type': target_type,
-            'is_nullable': is_nullable,
-            'description': description,
-            'is_join': True,
-            'join_type': join_type,
-            'join_conditions': join_conditions,
-            'additional_source_tables': additional_tables if additional_tables else None
+            'Source_schema': self.source_schema,
+            'Source_Table': primary_table,
+            'Source_Column': source_column,
+            'Source_DataType': source_data_type,
+            'Target_schema': self.target_schema,
+            'Target_Table': target_table,
+            'Target_Column': target_column,
+            'Target_DataType': target_type,
+            'Transformation_Logic': transform_sql,
+            'Primary_key': 'Yes' if is_primary_key else '',
+            'Nullable': nullable
         }
     
-    def _determine_nullable(self, column_name: str, transform_sql: str) -> bool:
-        """Determine if target column should be nullable"""
+    def _generate_complex_join_record(self, entity: str, scenario_name: str) -> Dict:
+        """Generate a complex multi-table join transformation record (3+ tables)"""
+        num_related = random.randint(2, 4)
+        related_entities = self.transformation_generator.get_related_entities(entity, num_related)
+        all_entities = [entity] + related_entities[:3]
+        
+        table_aliases, source_columns, source_types = self.transformation_generator.generate_multi_table_sources(
+            all_entities, tables_per_entity=1
+        )
+        
+        primary_table = table_aliases.get('t1', NamingGenerator.generate_table_name(entity, layer='raw'))
+        additional_tables = [table_aliases[k] for k in sorted(table_aliases.keys()) if k != 't1']
+        
+        target_table = NamingGenerator.generate_table_name(entity, layer='target')
+        target_column = NamingGenerator.generate_column_name(entity)
+        primary_source_type = source_types[0] if source_types else 'VARCHAR'
+        target_type = DataTypeMapper.map_to_target_type(primary_source_type)
+        
+        transform_sql = self.transformation_generator.generate_complex_select_sql(
+            source_columns, source_types, target_column, target_type, scenario_name,
+            table_aliases=table_aliases
+        )
+        
+        if len(source_columns) == 1:
+            source_column = source_columns[0]
+            source_data_type = source_types[0]
+        else:
+            qualified_columns = []
+            for i, col in enumerate(source_columns):
+                table_idx = min(i // 3 + 1, len(all_entities))
+                alias = f"t{table_idx}"
+                qualified_columns.append(f"{alias}.{col}")
+            source_column = ', '.join(qualified_columns[:4])
+            source_data_type = ', '.join(source_types[:4])
+        
+        is_primary_key = self._is_primary_key_column(target_column)
+        nullable = 'No' if is_primary_key else random.choice(['Yes', 'No'])
+        
+        return {
+            'Source_schema': self.source_schema,
+            'Source_Table': primary_table,
+            'Source_Column': source_column,
+            'Source_DataType': source_data_type,
+            'Target_schema': self.target_schema,
+            'Target_Table': target_table,
+            'Target_Column': target_column,
+            'Target_DataType': target_type,
+            'Transformation_Logic': transform_sql,
+            'Primary_key': 'Yes' if is_primary_key else '',
+            'Nullable': nullable
+        }
+    
+    def _is_primary_key_column(self, column_name: str) -> bool:
+        """Determine if column is a primary key based on naming conventions"""
         col_lower = column_name.lower()
-        
-        # ID/Key columns usually not nullable
-        if any(x in col_lower for x in ['_id', '_key', '_code', '_number']):
-            return False
-        
-        # If transformation has CASE with NULL handling, it might not be nullable
-        if 'COALESCE' in transform_sql.upper() or 'ELSE' in transform_sql.upper():
-            # Has null handling, likely not nullable
-            if 'NULL' not in transform_sql.upper().split('ELSE')[-1].upper():
-                return False
-        
-        # Default to nullable for safety
-        return True
+        return any(x in col_lower for x in ['_id', '_key', '_code', '_number'])
     
     def save_csv(self, data: List[Dict], filepath: str):
         """Save mappings to CSV file"""

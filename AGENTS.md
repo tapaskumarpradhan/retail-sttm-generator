@@ -4,7 +4,7 @@ This file provides guidance for AI agents working on this codebase.
 
 ## Project Overview
 
-STTM Generator is a Python library that generates Source-to-Target Mappings (STTM) for ETL pipeline testing. It produces production-like data mappings with complex SQL transformations (2+ nested functions or CASE logic), including multi-table JOIN transformations.
+STTM Generator is a Python library that generates Source-to-Target Mappings (STTM) for ETL pipeline testing. It produces production-like data mappings with complex SQL transformations (2+ nested functions or CASE logic), including multi-table JOIN transformations with 3+ tables.
 
 ## Project Structure
 
@@ -17,13 +17,46 @@ sttm_generator/
 │   ├── scenario_manager.py
 │   └── retail_scenarios.py
 ├── transformations/
-│   ├── library.py          # 60+ complex transformations
-│   └── generators.py
+│   ├── library.py          # 75 complex transformations
+│   └── generators.py       # Transformation generation logic
 └── utils/
     ├── datatypes.py
     ├── naming.py
     └── formatters.py
 ```
+
+---
+
+## Output Schema
+
+| Column | Description |
+|--------|-------------|
+| `Target_schema` | Schema name for target (e.g., ecom_tgt) |
+| `Target_Table` | Target table name |
+| `Target_Column` | Target column name |
+| `Target_DataType` | Target data type |
+| `Primary_key` | Yes if primary key, empty otherwise |
+| `Nullable` | Yes/No |
+| `Source_schema` | Schema name for source (e.g., ecom_demo) |
+| `Source_Table` | Primary source table name |
+| `Source_Column` | Source column name(s) - qualified with table alias for joins |
+| `Source_DataType` | Source data type(s) |
+| `Transformation_Logic` | SELECT statement or complex SQL expression |
+
+**Column Order**: Target columns first, then Source columns, then Transformation.
+
+---
+
+## Transformation Types
+
+### Simple Transformations (30%)
+- Direct SQL expressions with 2+ nested functions or CASE logic
+- No SELECT statement
+- Examples: `CONCAT(UPPER(TRIM(col)), ' - ', LPAD(id, 10, '0'))`
+
+### SELECT Transformations (70%)
+- **Simple JOIN** (2 tables): `SELECT t1.col FROM table1 t1 JOIN table2 t2 ON t1.id = t2.id`
+- **Complex JOIN** (3+ tables): Multi-table joins with subqueries, window functions, CASE statements
 
 ---
 
@@ -139,9 +172,14 @@ def generate(self, rows: int, scenario: Optional[str] = None) -> List[Dict]:
     pass
 
 class STTMGenerator:
-    def __init__(self, seed: Optional[int] = None, join_probability: float = 0.3):
+    def __init__(self, seed: Optional[int] = None, join_probability: float = 0.3,
+                 select_probability: float = 0.7, source_schema: str = 'ecom_demo',
+                 target_schema: str = 'ecom_tgt'):
         self.seed: Optional[int] = seed
         self.join_probability: float = join_probability
+        self.select_probability: float = select_probability
+        self.source_schema: str = source_schema
+        self.target_schema: str = target_schema
 ```
 
 ### Imports
@@ -238,8 +276,8 @@ All transformations MUST meet these criteria:
 |------|---------|
 | `sttm_generator.py` | Main STTMGenerator class |
 | `cli.py` | Command-line interface |
-| `transformations/library.py` | 60+ SQL transformation templates |
-| `transformations/generators.py` | Transformation generation logic |
+| `transformations/library.py` | 75 SQL transformation templates |
+| `transformations/generators.py` | Transformation generation logic with complex JOIN support |
 | `scenarios/retail_scenarios.py` | 15 retail business scenarios |
 | `utils/naming.py` | Business semantic naming (450+ columns) |
 | `utils/formatters.py` | CSV/Excel/Markdown output |
@@ -271,6 +309,8 @@ All transformations MUST meet these criteria:
 
 - No LLM dependencies - pure Python implementation
 - Deterministic output with seeds for regression testing
-- Default join probability is 0.3 (30% of transforms include JOINs)
+- Default select probability is 0.7 (70% SELECT statements, 30% simple transforms)
+- Default join probability is 0.3 (30% of SELECT statements include JOINs)
+- Complex JOINs use 3+ tables with window functions, subqueries, CASE logic
 - Excel output requires: `pip install openpyxl`
 - Output filenames include scenario name and timestamp (e.g., `Customer_Management_sttm_20260222_120000.csv`)

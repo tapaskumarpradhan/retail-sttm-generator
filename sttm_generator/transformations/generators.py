@@ -400,3 +400,175 @@ class TransformationGenerator:
             return related
         
         return random.sample(related, num_related)
+    
+    def generate_simple_transformation(self, source_columns: List[str], source_types: List[str],
+                                       target_column: str, target_type: str,
+                                       scenario_name: Optional[str] = None) -> Tuple[str, str]:
+        """Generate simple (non-SELECT) complex transformation"""
+        transform = self._select_transformation(source_types, scenario_name)
+        sql = self._build_sql(transform, source_columns, source_types)
+        description = self._build_description(sql, source_columns, target_column)
+        return sql, description
+    
+    def generate_select_sql(self, source_columns: List[str], source_types: List[str],
+                           target_column: str, target_type: str,
+                           scenario_name: Optional[str] = None,
+                           is_join: bool = False,
+                           table_aliases: Optional[Dict[str, str]] = None,
+                           primary_table: str = 'table_name') -> str:
+        """Generate SELECT statement transformation"""
+        if is_join and table_aliases:
+            return self._generate_select_with_join(source_columns, source_types, table_aliases)
+        else:
+            table_name = list(table_aliases.values())[0] if table_aliases else primary_table
+            return self._generate_simple_select(source_columns, source_types, table_name)
+    
+    def _generate_simple_select(self, source_columns: List[str], 
+                                source_types: List[str],
+                                table_name: str = 'table_name') -> str:
+        """Generate a simple SELECT statement"""
+        col = source_columns[0] if source_columns else 'id'
+        
+        templates = [
+            f"SELECT {table_name}.{col} FROM {table_name}",
+            f"SELECT MAX({table_name}.{col}) FROM {table_name}",
+            f"SELECT MIN({table_name}.{col}) FROM {table_name}",
+            f"SELECT COUNT({table_name}.{col}) FROM {table_name}",
+            f"SELECT SUM({table_name}.{col}) FROM {table_name}",
+            f"SELECT AVG({table_name}.{col}) FROM {table_name}",
+        ]
+        return random.choice(templates)
+    
+    def _generate_select_with_join(self, source_columns: List[str],
+                                   source_types: List[str],
+                                   table_aliases: Dict[str, str]) -> str:
+        """Generate SELECT with JOIN (2 tables)"""
+        tables = list(table_aliases.values())
+        aliases = list(table_aliases.keys())
+        
+        if len(tables) < 2:
+            col = source_columns[0] if source_columns else 'id'
+            return f"SELECT t1.{col} FROM {tables[0]} t1"
+        
+        col1 = source_columns[0] if source_columns else 'id'
+        col2 = source_columns[1] if len(source_columns) > 1 else 'customer_id'
+        
+        join_type = random.choice(['LEFT JOIN', 'INNER JOIN'])
+        
+        templates = [
+            f"SELECT t1.{col1} FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+            f"SELECT t1.{col1}, t2.{col2} FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+            f"SELECT MAX(t1.{col1}) FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+            f"SELECT SUM(t1.{col1}) FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+            f"SELECT COUNT(t1.{col1}) FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+            f"SELECT AVG(t1.{col1}) FROM {tables[0]} t1 {join_type} {tables[1]} t2 ON t1.{col2} = t2.{col2}",
+        ]
+        return random.choice(templates)
+    
+    def generate_complex_select_sql(self, source_columns: List[str], source_types: List[str],
+                                    target_column: str, target_type: str,
+                                    scenario_name: Optional[str] = None,
+                                    table_aliases: Optional[Dict[str, str]] = None) -> str:
+        """Generate complex SELECT with 3+ table joins"""
+        if not table_aliases:
+            return self._generate_simple_select(source_columns, source_types)
+        
+        return self._generate_complex_join_sql(source_columns, source_types, table_aliases)
+    
+    def _generate_complex_join_sql(self, source_columns: List[str],
+                                   source_types: List[str],
+                                   table_aliases: Dict[str, str]) -> str:
+        """Generate complex SELECT with 3+ table joins and tricky transformations"""
+        tables = list(table_aliases.values())
+        aliases = list(table_aliases.keys())
+        num_tables = len(tables)
+        
+        if num_tables < 3:
+            return self._generate_select_with_join(source_columns, source_types, table_aliases)
+        
+        col1 = source_columns[0] if source_columns else 'customer_id'
+        col2 = source_columns[1] if len(source_columns) > 1 else 'order_id'
+        col3 = source_columns[2] if len(source_columns) > 2 else 'product_id'
+        col4 = source_columns[3] if len(source_columns) > 3 else 'amount'
+        
+        complex_templates = [
+            f"""SELECT t1.{col1}, t2.{col2}, t3.{col3}, SUM(t4.{col4}) as total
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t2.{col2} = t3.{col2}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t3.{col3} = t4.{col3}
+GROUP BY t1.{col1}, t2.{col2}, t3.{col3}""",
+            
+            f"""SELECT t1.{col1}, 
+       CASE WHEN t2.{col2} IS NOT NULL THEN t2.{col2} ELSE t3.{col3} END as resolved_value,
+       COALESCE(t4.{col4}, 0) as adjusted_amount
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t1.{col1} = t3.{col1}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t2.{col2} = t4.{col3}""",
+            
+            f"""SELECT t1.{col1}, 
+       AVG(t2.{col4}) as avg_value,
+       MAX(t3.{col4}) as max_value,
+       COUNT(DISTINCT t4.{col2}) as distinct_count
+FROM {tables[0]} t1
+INNER JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t2.{col2} = t3.{col2}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t3.{col3} = t4.{col3}
+WHERE t2.{col4} > 0
+GROUP BY t1.{col1}""",
+            
+            f"""SELECT t1.{col1},
+       SUM(CASE WHEN t2.{col2} = 'ACTIVE' THEN t4.{col4} ELSE 0 END) as active_amount,
+       SUM(CASE WHEN t3.{col3} IS NOT NULL THEN t4.{col4} ELSE 0 END) as valid_amount,
+       ROUND(SUM(t4.{col4}) / NULLIF(COUNT(t4.{col2}), 0), 2) as avg_rate
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t2.{col2} = t3.{col2}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t3.{col3} = t4.{col3}
+GROUP BY t1.{col1}""",
+            
+            f"""SELECT t1.{col1},
+       DATEDIFF(CURRENT_DATE(), MAX(t2.{col2})) as days_since,
+       DATE_ADD(MAX(t3.{col2}), INTERVAL 30 DAY) as future_date,
+       CASE WHEN SUM(t4.{col4}) > 10000 THEN 'PREMIUM' 
+            WHEN SUM(t4.{col4}) > 5000 THEN 'GOLD' 
+            ELSE 'STANDARD' END as segment
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t1.{col1} = t3.{col1}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t2.{col2} = t4.{col3}
+GROUP BY t1.{col1}""",
+            
+            f"""SELECT t1.{col1},
+       t2.{col2},
+       t3.{col3},
+       t4.{col4},
+       ROW_NUMBER() OVER (PARTITION BY t1.{col1} ORDER BY t4.{col4} DESC) as row_num,
+       RANK() OVER (PARTITION BY t2.{col2} ORDER BY t4.{col4} DESC) as rank_val
+FROM {tables[0]} t1
+INNER JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t2.{col2} = t3.{col2}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t3.{col3} = t4.{col3}""",
+            
+            f"""SELECT t1.{col1},
+       (SELECT MAX(t2.{col2}) FROM {tables[1]} t2 WHERE t2.{col1} = t1.{col1}) as max_val,
+       (SELECT AVG(t3.{col4}) FROM {tables[2]} t3 WHERE t3.{col2} = t2.{col2}) as avg_calc,
+       CASE WHEN EXISTS (SELECT 1 FROM {tables[3] if num_tables > 3 else tables[0]} t4 WHERE t4.{col3} = t1.{col1}) 
+            THEN 'FOUND' ELSE 'NOT_FOUND' END as exists_flag
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}""",
+            
+            f"""SELECT t1.{col1},
+       COALESCE(t2.{col4}, t3.{col4}, t4.{col4}, 0) as fallback_amount,
+       CASE WHEN t2.{col2} IN ('COMPLETED', 'PROCESSED') THEN 'SUCCESS'
+            WHEN t3.{col3} = 'RETURNED' THEN 'RETURNED'
+            ELSE 'PENDING' END as status,
+       CONCAT(t1.{col1}, '-', t2.{col2}, '-', t3.{col3}) as composite_key
+FROM {tables[0]} t1
+LEFT JOIN {tables[1]} t2 ON t1.{col1} = t2.{col1}
+LEFT JOIN {tables[2]} t3 ON t2.{col2} = t3.{col2}
+LEFT JOIN {tables[3] if num_tables > 3 else tables[0]} t4 ON t3.{col3} = t4.{col3}""",
+        ]
+        
+        return random.choice(complex_templates)

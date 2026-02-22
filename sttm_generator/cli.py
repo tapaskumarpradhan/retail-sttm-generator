@@ -25,19 +25,25 @@ def create_parser():
         epilog="""
 Examples:
   # Generate 50 random STTM records
-  python cli.py --rows 50
+  python -m sttm_generator.cli --rows 50
   
   # Deterministic generation with seed
-  python cli.py --rows 100 --seed 42 --format excel
+  python -m sttm_generator.cli --rows 100 --seed 42 --format excel
   
   # Specific retail scenario
-  python cli.py --scenario "Customer Management" --rows 20
+  python -m sttm_generator.cli --scenario "Customer Management" --rows 20
+  
+  # Custom schema names
+  python -m sttm_generator.cli --source-schema retail_src --target-schema retail_tgt --rows 10
+  
+  # Control transformation types
+  python -m sttm_generator.cli --select-probability 0.5 --join-probability 0.5 --rows 20
   
   # List all scenarios
-  python cli.py --list-scenarios
+  python -m sttm_generator.cli --list-scenarios
   
   # Show transformation statistics
-  python cli.py --show-stats
+  python -m sttm_generator.cli --show-stats
         """
     )
     
@@ -51,6 +57,14 @@ Examples:
                        default='csv', help='Output format (default: csv)')
     parser.add_argument('-o', '--output', type=str, default=None,
                        help='Output file path (default: sttm_output.{format})')
+    parser.add_argument('--select-probability', type=float, default=0.7,
+                       help='Probability of SELECT statements vs simple transforms (default: 0.7)')
+    parser.add_argument('--join-probability', type=float, default=0.3,
+                       help='Probability of JOINs within SELECT statements (default: 0.3)')
+    parser.add_argument('--source-schema', type=str, default='ecom_demo',
+                       help='Source schema name (default: ecom_demo)')
+    parser.add_argument('--target-schema', type=str, default='ecom_tgt',
+                       help='Target schema name (default: ecom_tgt)')
     parser.add_argument('--list-scenarios', action='store_true',
                        help='List all available scenarios and exit')
     parser.add_argument('--show-stats', action='store_true',
@@ -119,7 +133,11 @@ def main():
             args.output = os.path.join(output_dir, f"{base_name}.md")
         else:
             args.output = os.path.join(output_dir, f"{base_name}.csv")
-    elif not os.path.isabs(args.output):
+    elif os.path.isabs(args.output):
+        pass
+    elif '/' in args.output or '\\' in args.output:
+        os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    else:
         args.output = os.path.join(output_dir, args.output)
     
     # Initialize generator
@@ -130,7 +148,13 @@ def main():
         print(f"Scenario: {args.scenario}")
     print("Complex transformations only (2+ nested functions or CASE logic)")
     
-    generator = STTMGenerator(seed=args.seed)
+    generator = STTMGenerator(
+        seed=args.seed,
+        select_probability=args.select_probability,
+        join_probability=args.join_probability,
+        source_schema=args.source_schema,
+        target_schema=args.target_schema
+    )
     mappings = generator.generate(rows=args.rows, scenario=args.scenario)
     
     # Save to file
