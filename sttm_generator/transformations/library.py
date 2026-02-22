@@ -1,5 +1,5 @@
 """
-Transformation Library - 60+ Complex SQL Transformations
+Transformation Library - 75 Complex SQL Transformations
 ALL transformations are complex with 2+ nested functions or conditional logic
 """
 import random

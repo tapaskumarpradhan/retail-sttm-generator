@@ -17,8 +17,8 @@ A Python-based Source-to-Target Mapping (STTM) generator for ETL pipeline testin
 No installation required. Just clone and use:
 
 ```bash
-git clone <repository-url>
-cd sttm-generator
+git clone https://github.com/tapaskumarpradhan/retail-sttm-generator.git
+cd retail-sttm-generator
 ```
 
 ### Optional Dependencies
@@ -34,19 +34,19 @@ pip install openpyxl
 
 ```bash
 # Generate 50 random STTM records
-python3 sttm_generator/cli.py --rows 50
+python3 -m sttm_generator.cli --rows 50
 
 # Deterministic generation with seed
-python3 sttm_generator/cli.py --rows 100 --seed 42 --format excel
+python3 -m sttm_generator.cli --rows 100 --seed 42 --format excel
 
 # Specific retail scenario
-python3 sttm_generator/cli.py --scenario "Customer Management" --rows 20
+python3 -m sttm_generator.cli --scenario "Customer Management" --rows 20
 
 # List all scenarios
-python3 sttm_generator/cli.py --list-scenarios
+python3 -m sttm_generator.cli --list-scenarios
 
 # Show statistics
-python3 sttm_generator/cli.py --show-stats
+python3 -m sttm_generator.cli --show-stats
 ```
 
 ### Python API
@@ -291,17 +291,7 @@ markdown = generator.to_markdown_table(mappings)
 ## CLI Reference
 
 ```
-python3 sttm_generator/cli.py [OPTIONS]
-
-Options:
-  -r, --rows INTEGER        Number of records (default: 10)
-  -s, --seed INTEGER        Random seed for deterministic output
-  --scenario TEXT           Specific scenario to use
-  -f, --format FORMAT       Output: csv, excel, text (default: csv)
-  -o, --output FILEPATH     Output file path
-  --list-scenarios          List all scenarios
-  --show-stats              Show transformation statistics
-  -h, --help               Show help
+python3 -m sttm_generator.cli [OPTIONS]
 ```
 
 ## API Reference
